@@ -17,7 +17,8 @@ This document summarizes the functionality of `main.cpp`, which implements a rea
   - Reading and timing a frame.
   - Resizing and normalizing the image for the model.
   - Building an input tensor and running inference.
-  - Parsing detections and mapping coordinates back to the original frame, with optional debug output for early frames.
+  - Parsing detections from a single output tensor of shape `[1, N, num_classes+5]` where each row contains objectness, bounding box center coordinates, size, and class scores.
+  - Mapping box coordinates back to the original frame.
   - Applying per-class Non-Max Suppression and drawing boxes with labels.
   - Displaying FPS and exiting when `q` is pressed.
 
