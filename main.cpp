@@ -15,6 +15,7 @@
 #include <numeric>
 #include <algorithm>
 #include <sstream>
+#include <cstdint>
 
 #include <onnxruntime_cxx_api.h>
 
@@ -137,7 +138,7 @@ int main() {
     cv::namedWindow(window_name, cv::WINDOW_AUTOSIZE);
 
     double fps = 0.0;
-    int64 tick_start; // For storing start tick count
+    int64_t tick_start; // For storing start tick count
     int frame_counter_fps = 0; // To average FPS over a few frames for stability
     double total_time_fps = 0.0;
 
