@@ -199,7 +199,8 @@ int main() {
         }
 
         // 4. Post-processing
-        const float conf_threshold = 0.5f; // Your confidence threshold
+        const float obj_threshold = 0.25f; // Objectness threshold for YOLOv11
+        const float conf_threshold = 0.25f; // Final confidence threshold
         const float nms_threshold = 0.45f;  // Your NMS threshold
 
         std::vector<cv::Rect> bboxes;
@@ -212,14 +213,13 @@ int main() {
             auto output_shape = output_tensors[0].GetTensorTypeAndShapeInfo().GetShape();
 
             // output_shape should be [batch_size, num_potential_detections, num_attributes]
-            // e.g., [1, 8400, 84] if 80 classes (4 for box + 80 for scores)
-            // or [1, N, 4 + C] where C is num_classes
-            // const int64_t batch_size_out = output_shape[0]; // Should be same as input batch_size
-            const int64_t num_potential_detections = output_shape[1]; // This is 'concatenateoutput0_dim_1'
-            const int64_t attributes_per_detection = output_shape[2]; // This is 'anchors'
+            // For Ultralytics YOLO export without postprocessing the last dimension is
+            // (num_classes + 5) -> [objectness, cx, cy, w, h, class scores]
+            const int64_t num_potential_detections = output_shape[1];
+            const int64_t attributes_per_detection = output_shape[2];
 
-            // Infer number of classes from the output shape: attributes_per_detection = 4 (box) + num_classes
-            const int inferred_num_classes = static_cast<int>(attributes_per_detection - 4);
+            // Infer number of classes from the output shape
+            const int inferred_num_classes = static_cast<int>(attributes_per_detection - 5);
 
             if (inferred_num_classes != CLASS_NAMES.size()) {
                 std::cerr << "WARNING: Model's inferred number of classes (" << inferred_num_classes
@@ -238,112 +238,53 @@ int main() {
             float model_input_width_float = static_cast<float>(width);  // Model input width (e.g., 640)
             float model_input_height_float = static_cast<float>(height); // Model input height (e.g., 640)
 
-            int debug_boxes_printed_this_frame = 0;
-
+            // Each detection row is [obj, cx, cy, w, h, class_scores...]
             for (int i = 0; i < num_potential_detections; ++i) {
-                // Pointer to the start of the current detection's data
-                // Each detection has 'attributes_per_detection' floats (4 for box + num_classes for scores)
                 const float* current_detection_data = all_data_ptr + i * attributes_per_detection;
 
-                // The first 4 values are box coordinates (e.g., x1, y1, x2, y2 or cx, cy, w, h)
-                // The next 'inferred_num_classes' values are the class scores.
+                float objectness = current_detection_data[0];
+                if (objectness < obj_threshold) {
+                    continue;
+                }
 
-                // --- Find the class with the highest score for this detection ---
                 float max_class_score = 0.0f;
                 int best_class_id = -1;
-
-                // Scores start after the 4 box coordinates
-                const float* class_scores_ptr = current_detection_data + 4;
-                for (int j = 0; j < num_classes_to_iterate; ++j) {
-                    if (j < inferred_num_classes) { // Ensure we don't read past what the model provides
-                        if (class_scores_ptr[j] > max_class_score) {
-                            max_class_score = class_scores_ptr[j];
-                            best_class_id = j;
-                        }
+                const float* class_scores_ptr = current_detection_data + 5;
+                for (int j = 0; j < num_classes_to_iterate && j < inferred_num_classes; ++j) {
+                    if (class_scores_ptr[j] > max_class_score) {
+                        max_class_score = class_scores_ptr[j];
+                        best_class_id = j;
                     }
                 }
 
-                if (max_class_score > conf_threshold) {
-                    // --- Bounding Box Parsing ---
-                    // IMPORTANT: Determine if your model outputs [x_center, y_center, width, height]
-                    // or [x_min, y_min, x_max, y_max].
-                    // The following assumes [x_min, y_min, x_max, y_max] in pixel coordinates
-                    // relative to the model's input size (e.g., 640x640), similar to your "NEW INTERPRETATION".
-                    // If it's cx, cy, w, h, you'll need to convert.
+                float conf = objectness * max_class_score;
+                if (conf < conf_threshold) {
+                    continue;
+                }
 
-                    float x1_model = current_detection_data[0]; // x_min in model input space (e.g., 640x640)
-                    float y1_model = current_detection_data[1]; // y_min in model input space
-                    float x2_model = current_detection_data[2]; // x_max in model input space
-                    float y2_model = current_detection_data[3]; // y_max in model input space
+                float cx_model = current_detection_data[1];
+                float cy_model = current_detection_data[2];
+                float w_model  = current_detection_data[3];
+                float h_model  = current_detection_data[4];
 
-                    // If your model actually outputs cx, cy, w, h (center_x, center_y, width, height):
-                    /*
-                    float cx_model = current_detection_data[0];
-                    float cy_model = current_detection_data[1];
-                    float w_model  = current_detection_data[2];
-                    float h_model  = current_detection_data[3];
+                float x1_model = cx_model - w_model / 2.0f;
+                float y1_model = cy_model - h_model / 2.0f;
 
-                    float x1_model = cx_model - w_model / 2.0f;
-                    float y1_model = cy_model - h_model / 2.0f;
-                    float x2_model = cx_model + w_model / 2.0f;
-                    float y2_model = cy_model + h_model / 2.0f;
-                    */
+                float frame_width_orig = static_cast<float>(frame.cols);
+                float frame_height_orig = static_cast<float>(frame.rows);
 
-                    // Calculate width and height in model input space (e.g., 640x640)
-                    float abs_w_model = x2_model - x1_model;
-                    float abs_h_model = y2_model - y1_model;
+                int x1_orig = static_cast<int>(x1_model * (frame_width_orig / model_input_width_float));
+                int y1_orig = static_cast<int>(y1_model * (frame_height_orig / model_input_height_float));
+                int box_width_orig = static_cast<int>(w_model * (frame_width_orig / model_input_width_float));
+                int box_height_orig = static_cast<int>(h_model * (frame_height_orig / model_input_height_float));
 
-                    // Scale to original frame dimensions
-                    float frame_width_orig = static_cast<float>(frame.cols);
-                    float frame_height_orig = static_cast<float>(frame.rows);
+                cv::Rect box_orig(x1_orig, y1_orig, box_width_orig, box_height_orig);
+                box_orig &= cv::Rect(0, 0, static_cast<int>(frame_width_orig), static_cast<int>(frame_height_orig));
 
-                    int x1_orig = static_cast<int>(x1_model * (frame_width_orig / model_input_width_float));
-                    int y1_orig = static_cast<int>(y1_model * (frame_height_orig / model_input_height_float));
-                    int box_width_orig = static_cast<int>(abs_w_model * (frame_width_orig / model_input_width_float));
-                    int box_height_orig = static_cast<int>(abs_h_model * (frame_height_orig / model_input_height_float));
-
-                    // --- BEGIN NEW DEBUG BLOCK ---
-                    if (frame_count_for_debug < 2 && debug_boxes_printed_this_frame < 3) {
-                        std::cout << "\n--- Box Candidate " << debug_boxes_printed_this_frame + 1 << " (Score: " << max_class_score << ") ---" << std::endl;
-                    
-                        // 1. Print the raw coordinates directly from the model
-                        const float* raw_coords = current_detection_data;
-                        std::cout << "Raw Coords [0-3]:      "
-                                  << raw_coords[0] << ", " << raw_coords[1] << ", "
-                                  << raw_coords[2] << ", " << raw_coords[3] << std::endl;
-                    
-                        // 2. Interpret as [x_min, y_min, x_max, y_max]
-                        float x1_xyxy = raw_coords[0];
-                        float y1_xyxy = raw_coords[1];
-                        float x2_xyxy = raw_coords[2];
-                        float y2_xyxy = raw_coords[3];
-                        std::cout << "Interpreted as xyxy:   x1=" << x1_xyxy << ", y1=" << y1_xyxy
-                                  << ", x2=" << x2_xyxy << ", y2=" << y2_xyxy << std::endl;
-                    
-                        // 3. Interpret as [center_x, center_y, width, height]
-                        float cx = raw_coords[0];
-                        float cy = raw_coords[1];
-                        float w  = raw_coords[2];
-                        float h  = raw_coords[3];
-                        float x1_cxcywh = cx - w / 2.0f;
-                        float y1_cxcywh = cy - h / 2.0f;
-                        float x2_cxcywh = cx + w / 2.0f;
-                        float y2_cxcywh = cy + h / 2.0f;
-                        std::cout << "Interpreted as cxcywh: x1=" << x1_cxcywh << ", y1=" << y1_cxcywh
-                                  << ", x2=" << x2_cxcywh << ", y2=" << y2_cxcywh << std::endl;
-                    
-                        debug_boxes_printed_this_frame++;
-                    }
-                    // --- END NEW DEBUG BLOCK ---
-
-                    cv::Rect box_orig(x1_orig, y1_orig, box_width_orig, box_height_orig);
-                    box_orig &= cv::Rect(0, 0, (int)frame_width_orig, (int)frame_height_orig); // Clip to frame
-
-                    if (box_orig.width > 0 && box_orig.height > 0) {
-                        bboxes.push_back(box_orig);
-                        scores.push_back(max_class_score);
-                        class_ids.push_back(best_class_id);
-                    }
+                if (box_orig.width > 0 && box_orig.height > 0) {
+                    bboxes.push_back(box_orig);
+                    scores.push_back(conf);
+                    class_ids.push_back(best_class_id);
                 }
             }
 
