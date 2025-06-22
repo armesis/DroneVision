@@ -24,6 +24,7 @@ endif()
 
 # Include ONNX Runtime headers
 include_directories(${ONNXRUNTIME_ROOTDIR}/include)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/third_party)
 
 # Define the ONNX Runtime library
 # The actual .so file might have version numbers, but libonnxruntime.so is usually a symlink
@@ -52,11 +53,24 @@ set_target_properties(onnxruntime_providers_cuda PROPERTIES
 # --- Executable ---
 add_executable(live_camera_app main.cpp)
 
+add_executable(inference_service services/inference_service.cpp)
+add_executable(capture_service services/capture_service.cpp)
+
 # Link libraries
 target_link_libraries(live_camera_app
     ${OpenCV_LIBS}
     onnxruntime # Link against the ONNX Runtime library we defined
     onnxruntime_providers_cuda
+)
+
+target_link_libraries(inference_service
+    ${OpenCV_LIBS}
+    onnxruntime
+    onnxruntime_providers_cuda
+)
+
+target_link_libraries(capture_service
+    ${OpenCV_LIBS}
 )
 
 # Optional: Print messages

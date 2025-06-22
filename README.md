@@ -25,3 +25,11 @@ Key points:
 - Document design decisions and usage instructions in `docs/`.
 
 These changes make it easier to navigate the repository and separate generated files from source code.
+
+## Microservice Example
+
+The `services/` folder now contains a minimal C++ demonstration of splitting
+model inference and camera capture into separate processes. `inference_service`
+exposes an HTTP endpoint for running the YOLO model, while `capture_service`
+streams frames from the webcam and sends them to the inference service.
+See `services/README.md` for build and run instructions.
