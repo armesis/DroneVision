@@ -24,7 +24,7 @@ int main() {
 
     // --- ONNX Runtime Setup -------------------------------------------------------------------------------------------------------------------------------------------
 
-    OnnxModel model("yolo11n.onnx"); 
+    OnnxModel model("./../models/yolo11n.onnx"); 
     auto& session   = model.session();               // if you need direct access
     auto& allocator = model.allocator();
     // --- ONNX Runtime Setup -------------------------------------------------------------------------------------------------------------------------------------------
