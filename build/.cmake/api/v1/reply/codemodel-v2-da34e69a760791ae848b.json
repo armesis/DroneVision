@@ -15,7 +15,8 @@
 					"source" : ".",
 					"targetIndexes" : 
 					[
-						0
+						0,
+						1
 					]
 				}
 			],
@@ -30,7 +31,8 @@
 					"name" : "LiveCameraOpenCV_VSCode",
 					"targetIndexes" : 
 					[
-						0
+						0,
+						1
 					]
 				}
 			],
@@ -39,8 +41,15 @@
 				{
 					"directoryIndex" : 0,
 					"id" : "live_camera_app::@6890427a1f51a3e7e1df",
-					"jsonFile" : "target-live_camera_app-Debug-20879f96bc1ec5b06b10.json",
+					"jsonFile" : "target-live_camera_app-Debug-d18498075c5ad64d90eb.json",
 					"name" : "live_camera_app",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "uavlib::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-uavlib-Debug-42bfdad01935cc0d5bd3.json",
+					"name" : "uavlib",
 					"projectIndex" : 0
 				}
 			]

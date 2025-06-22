@@ -1,13 +1,11 @@
 
-
 // YOLO_NAS runner ----------------------------------------------
 
-
-
-
-
-
-
+#include "camera.hpp"
+#include "draw.hpp"
+#include "classnames.hpp"
+#include "print_shape.hpp"
+#include "onnx_model.hpp"
 #include <opencv2/opencv.hpp>
 #include <iostream>
 #include <vector>
@@ -20,59 +18,15 @@
 #include <onnxruntime_cxx_api.h>
 
 // COCO Class Names
-const std::vector<std::string> CLASS_NAMES = {
-    "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat",
-    "traffic light", "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat",
-    "dog", "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe", "backpack",
-    "umbrella", "handbag", "tie", "suitcase", "frisbee", "skis", "snowboard", "sports ball",
-    "kite", "baseball bat", "baseball glove", "skateboard", "surfboard", "tennis racket",
-    "bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana", "apple",
-    "sandwich", "orange", "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair",
-    "couch", "potted plant", "bed", "dining table", "toilet", "tv", "laptop", "mouse",
-    "remote", "keyboard", "cell phone", "microwave", "oven", "toaster", "sink",
-    "refrigerator", "book", "clock", "vase", "scissors", "teddy bear", "hair drier",
-    "toothbrush"};
-
-// Helper function to pretty print tensor shapes
-std::string print_shape(const std::vector<int64_t>& v) {
-    std::stringstream ss;
-    ss << "{";
-    for (size_t i = 0; i < v.size(); ++i) {
-        ss << v[i] << (i == v.size() - 1 ? "" : ", ");
-    }
-    ss << "}";
-    return ss.str();
-}
+const auto& CLASS_NAMES = cocoClassNames();
 
 int main() {
 
     // --- ONNX Runtime Setup -------------------------------------------------------------------------------------------------------------------------------------------
 
-    Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "YOLO-NAS-App-GPU");
-    Ort::SessionOptions session_options;
-    session_options.SetIntraOpNumThreads(1);
-
-    OrtCUDAProviderOptions cuda_options{};
-    try {
-        session_options.AppendExecutionProvider_CUDA(cuda_options);
-        std::cout << "INFO: Attempting to use CUDA execution provider." << std::endl;
-    } catch (const Ort::Exception& e) {
-        std::cerr << "WARNING: Could not append CUDA execution provider: " << e.what() << std::endl;
-        std::cerr << "INFO: Will fall back to CPU or other available providers." << std::endl;
-    }
-
-    const char* model_path = "yolo11n.onnx";
-    Ort::Session session(nullptr);
-    try {
-        session = Ort::Session(env, model_path, session_options);
-        std::cout << "ONNX model loaded successfully: " << model_path << std::endl;
-    } catch (const Ort::Exception& e) {
-        std::cerr << "ERROR loading ONNX model: " << e.what() << std::endl;
-        return -1;
-    }
-
-    Ort::AllocatorWithDefaultOptions allocator;
-
+    OnnxModel model("yolo11n.onnx"); 
+    auto& session   = model.session();               // if you need direct access
+    auto& allocator = model.allocator();
     // --- ONNX Runtime Setup -------------------------------------------------------------------------------------------------------------------------------------------
 
     // --- Get input node details ---------------------------------------------------------------------------------------------------------------------------------------
@@ -88,7 +42,9 @@ int main() {
     Ort::TypeInfo input_type_info = session.GetInputTypeInfo(0);
     auto input_tensor_info = input_type_info.GetTensorTypeAndShapeInfo();
     std::vector<int64_t> input_dims = input_tensor_info.GetShape();
-    std::cout << "Model Input Dims Reported: " << print_shape(input_dims) << std::endl;
+    std::cout << "Model Input Dims Reported: ";
+    util::printShape(input_dims);
+    std::cout << std::endl;
 
     // --- Resolve Model Input Dimensions ---
     // Define the default size you used during the Python export (e.g., imgsz=640)
@@ -118,24 +74,16 @@ int main() {
         Ort::TypeInfo output_type_info = session.GetOutputTypeInfo(i);
         auto output_tensor_info_loop = output_type_info.GetTensorTypeAndShapeInfo();
         std::vector<int64_t> output_dims_loop = output_tensor_info_loop.GetShape();
-        std::cout << "Output " << i << " Name: " << output_node_names_ptr[i] << " Dims: " << print_shape(output_dims_loop) << std::endl;
+        std::cout << "Output " << i << " Name: " << output_node_names_ptr[i] << " Dims: ";
+        util::printShape(output_dims_loop);
+        std::cout << std::endl;
     }
 
     // --- OpenCV Camera Setup ------------------------------------------------------------------------------------------------------------------------------------------
-    cv::VideoCapture cap(0);
-    if (!cap.isOpened()) {
-        std::cerr << "ERROR: Could not open camera" << std::endl;
-        return -1;
-    }
-    // Request camera resolution, but actual resolution will be in frame.cols/rows
-    cap.set(cv::CAP_PROP_FRAME_WIDTH, 640); 
-    cap.set(cv::CAP_PROP_FRAME_HEIGHT, 480);
+    Camera cam(0, 640, 480);
+    cv::Mat frame;
 
-    cv::Mat frame, resized_frame_rgb, preprocessed_frame;
-    std::vector<float> input_tensor_values(batch_size * channels * height * width);
-
-    std::string window_name = "YOLO-NAS ONNX C++ (Debug Pre-NMS Boxes)";
-    cv::namedWindow(window_name, cv::WINDOW_AUTOSIZE);
+    const std::string window_name = "Live camera feed";
 
     double fps = 0.0;
     int64_t tick_start; // For storing start tick count
@@ -146,13 +94,10 @@ int main() {
 
     int frame_count_for_debug = 0; // For limiting debug prints
     // ... (after cv::namedWindow and before the while loop) ...
-
     
-
     while (true) {
-        
+        if (!cam.grabFrame(frame)) break;
         tick_start = cv::getTickCount(); // Start timer for this frame
-        cap >> frame;
         if (frame.empty()) {
             std::cerr << "ERROR: Captured empty frame" << std::endl;
             break;
@@ -163,6 +108,9 @@ int main() {
 
         // 1. Preprocessing
         // 'width' and 'height' here are model input dimensions (e.g., 640x640)
+        cv::Mat resized_frame_rgb;
+        cv::Mat preprocessed_frame;
+        std::vector<float> input_tensor_values(height * width * 3);
         cv::resize(frame, resized_frame_rgb, cv::Size(width, height));
         cv::cvtColor(resized_frame_rgb, resized_frame_rgb, cv::COLOR_BGR2RGB);
         resized_frame_rgb.convertTo(preprocessed_frame, CV_32F, 1.0 / 255.0);
@@ -320,62 +268,8 @@ int main() {
             }
             
             // --- Draw the final Detections using final_kept_indices ---
-            // std::cout << "Frame " << frame_count_for_debug << ": Num boxes AFTER PER-CLASS NMS: " << final_kept_indices.size() << std::endl;
-            for (int idx : final_kept_indices) { 
-                cv::Rect box = bboxes[idx]; // Use original bboxes vector with the filtered indices
-                float score = scores[idx];
-                int class_id = class_ids[idx];
-            
-                if (class_id >= 0 && class_id < CLASS_NAMES.size()) { 
-                    cv::rectangle(frame, box, cv::Scalar(0, 255, 0), 2); 
-                    std::string label = CLASS_NAMES[class_id] + " " + cv::format("%.2f", score);
-                    // ... (putText code) ...
-                }
-            }
-            
-            // --- Draw the final Detections using final_kept_indices ---
-            // This section remains largely the same, drawing from bboxes, scores, class_ids using final_kept_indices
-            for (int idx : final_kept_indices) {
-                cv::Rect box = bboxes[idx];
-                float score = scores[idx];
-                int class_id = class_ids[idx];
-
-                if (class_id >= 0 && class_id < CLASS_NAMES.size()) {
-                    cv::rectangle(frame, box, cv::Scalar(0, 255, 0), 2); // Green boxes for final NMS
-                    std::string label = CLASS_NAMES[class_id] + " " + cv::format("%.2f", score);
-                    int baseLine;
-                    cv::Size labelSize = cv::getTextSize(label, cv::FONT_HERSHEY_SIMPLEX, 0.6, 1, &baseLine);
-                    int top = std::max(box.y, labelSize.height);
-                    cv::putText(frame, label, cv::Point(box.x, top - 5), cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0,0,0), 2); // Black text for better visibility
-                    cv::putText(frame, label, cv::Point(box.x, top - 5), cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 0), 1); // Green text
-                }
-            }
+            draw::detections(frame, bboxes, scores, class_ids, CLASS_NAMES);
             // --- END Section A ---
-
-
-            // --- Section B: Perform Non-Maximum Suppression (NMS) (Currently Commented Out) ---
-            /*
-            std::vector<int> nms_indices;
-            if (!bboxes.empty()) {
-                 cv::dnn::NMSBoxes(bboxes, scores, conf_threshold, nms_threshold, nms_indices);
-            }
-            std::cout << "Frame " << frame_count_for_debug << ": Num boxes AFTER NMS: " << nms_indices.size() << std::endl;
-            for (int idx : nms_indices) {
-                cv::Rect box = bboxes[idx];
-                float score = scores[idx];
-                int class_id = class_ids[idx];
-
-                if (class_id >= 0 && class_id < CLASS_NAMES.size()) {
-                    cv::rectangle(frame, box, cv::Scalar(0, 255, 0), 2); // Green boxes for NMS
-                    std::string label = CLASS_NAMES[class_id] + " " + cv::format("%.2f", score);
-                    int baseLine;
-                    cv::Size labelSize = cv::getTextSize(label, cv::FONT_HERSHEY_SIMPLEX, 0.6, 1, &baseLine);
-                    int top = std::max(box.y, labelSize.height);
-                    cv::putText(frame, label, cv::Point(box.x, top - 5), cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 0), 2);
-                }
-            }
-            */
-            // --- END Section B ---
 
         } else {
              cv::putText(frame, "Output tensor issue or no detections", cv::Point(10, 60), // Moved down
@@ -412,7 +306,6 @@ int main() {
         }
     }
 
-    cap.release();
     cv::destroyAllWindows();
     return 0;
 }

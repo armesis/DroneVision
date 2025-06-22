@@ -32,13 +32,13 @@
 			{
 				"command" : 1,
 				"file" : 0,
-				"line" : 56,
+				"line" : 55,
 				"parent" : 0
 			},
 			{
 				"command" : 2,
 				"file" : 0,
-				"line" : 26,
+				"line" : 22,
 				"parent" : 0
 			},
 			{
@@ -65,6 +65,10 @@
 					"path" : "/home/armesis/Downloads/onnxruntime_cpp/onnxruntime-linux-x64-gpu-1.20.0/include"
 				},
 				{
+					"backtrace" : 2,
+					"path" : "/home/armesis/live_camera_cpp_vscode/lib"
+				},
+				{
 					"backtrace" : 4,
 					"isSystem" : true,
 					"path" : "/usr/include/opencv4"
@@ -85,6 +89,13 @@
 			]
 		}
 	],
+	"dependencies" : 
+	[
+		{
+			"backtrace" : 2,
+			"id" : "uavlib::@6890427a1f51a3e7e1df"
+		}
+	],
 	"id" : "live_camera_app::@6890427a1f51a3e7e1df",
 	"link" : 
 	{
@@ -100,6 +111,11 @@
 			},
 			{
 				"fragment" : "-Wl,-rpath,/home/armesis/Downloads/onnxruntime_cpp/onnxruntime-linux-x64-gpu-1.20.0/lib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 2,
+				"fragment" : "libuavlib.a",
 				"role" : "libraries"
 			},
 			{
@@ -294,6 +310,16 @@
 			},
 			{
 				"backtrace" : 2,
+				"fragment" : "/usr/lib/x86_64-linux-gnu/libopencv_phase_unwrapping.so.4.6.0",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 2,
+				"fragment" : "/usr/lib/x86_64-linux-gnu/libopencv_optflow.so.4.6.0",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 2,
 				"fragment" : "/usr/lib/x86_64-linux-gnu/libopencv_highgui.so.4.6.0",
 				"role" : "libraries"
 			},
@@ -319,12 +345,7 @@
 			},
 			{
 				"backtrace" : 2,
-				"fragment" : "/usr/lib/x86_64-linux-gnu/libopencv_phase_unwrapping.so.4.6.0",
-				"role" : "libraries"
-			},
-			{
-				"backtrace" : 2,
-				"fragment" : "/usr/lib/x86_64-linux-gnu/libopencv_optflow.so.4.6.0",
+				"fragment" : "/usr/lib/x86_64-linux-gnu/libopencv_videoio.so.4.6.0",
 				"role" : "libraries"
 			},
 			{
@@ -335,11 +356,6 @@
 			{
 				"backtrace" : 2,
 				"fragment" : "/usr/lib/x86_64-linux-gnu/libopencv_video.so.4.6.0",
-				"role" : "libraries"
-			},
-			{
-				"backtrace" : 2,
-				"fragment" : "/usr/lib/x86_64-linux-gnu/libopencv_videoio.so.4.6.0",
 				"role" : "libraries"
 			},
 			{
@@ -412,7 +428,7 @@
 		{
 			"backtrace" : 1,
 			"compileGroupIndex" : 0,
-			"path" : "main.cpp",
+			"path" : "src/main.cpp",
 			"sourceGroupIndex" : 0
 		}
 	],
