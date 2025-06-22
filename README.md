@@ -8,7 +8,7 @@ This repository contains preliminary experiments for running YOLO models with Op
 DroneVision/
 ├── CMakeLists.txt
 ├── src/            # C++ source files
-├── include/        # C++ header files (if any)
+├── lib/            # C++ header files (if any)
 ├── models/         # Pretrained model files
 ├── data/           # Example images or videos
 ├── scripts/        # Utility scripts for setup or dataset preparation
