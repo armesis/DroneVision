@@ -6,6 +6,7 @@
 #include "classnames.hpp"
 #include "print_shape.hpp"
 #include "onnx_model.hpp"
+#include "model_info.hpp"
 #include <opencv2/opencv.hpp>
 #include <iostream>
 #include <vector>
@@ -30,54 +31,16 @@ int main() {
     // --- ONNX Runtime Setup -------------------------------------------------------------------------------------------------------------------------------------------
 
     // --- Get input node details ---------------------------------------------------------------------------------------------------------------------------------------
-    size_t num_input_nodes = session.GetInputCount();
-    if (num_input_nodes != 1) {
-        std::cerr << "ERROR: Expected 1 input node, but got " << num_input_nodes << std::endl;
-        return -1;
-    }
-    Ort::AllocatedStringPtr input_name_alloc = session.GetInputNameAllocated(0, allocator);
-    const char* input_node_names[] = {input_name_alloc.get()};
-    std::cout << "Input Name: " << input_node_names[0] << std::endl;
+    modelutil::InputInfo input = modelutil::inspectInput(session, allocator);
 
-    Ort::TypeInfo input_type_info = session.GetInputTypeInfo(0);
-    auto input_tensor_info = input_type_info.GetTensorTypeAndShapeInfo();
-    std::vector<int64_t> input_dims = input_tensor_info.GetShape();
-    std::cout << "Model Input Dims Reported: ";
-    util::printShape(input_dims);
-    std::cout << std::endl;
-
-    // --- Resolve Model Input Dimensions ---
-    // Define the default size you used during the Python export (e.g., imgsz=640)
-    const int64_t DEFAULT_MODEL_WIDTH = 640;
-    const int64_t DEFAULT_MODEL_HEIGHT = 640;
-
-    // Use reported dimension if it's positive, otherwise use the default.
-    const int64_t batch_size = (input_dims[0] == -1 || input_dims[0] == 0) ? 1 : input_dims[0];
-    const int64_t channels = input_dims[1];
-    const int64_t height = (input_dims[2] == -1 || input_dims[2] == 0) ? DEFAULT_MODEL_HEIGHT : input_dims[2];
-    const int64_t width = (input_dims[3] == -1 || input_dims[3] == 0) ? DEFAULT_MODEL_WIDTH : input_dims[3];
-    
-    std::cout << "Using Resolved Input Dims: { Batch: " << batch_size << ", Channels: " << channels
-              << ", Height: " << height << ", Width: " << width << " }" << std::endl;
-
+    // the resolved dimensions are now in input.dims
+    int64_t width     = input.dims.width;
+    int64_t height    = input.dims.height;
+    int64_t channels  = input.dims.channels;
+    int64_t batch     = input.dims.batch;
 
     // --- Get output node details -------------------------------------------------------------------------------------------------------------------------------------
-    size_t num_output_nodes = session.GetOutputCount();
-    std::vector<std::string> output_node_names_str(num_output_nodes);
-    std::vector<const char*> output_node_names_ptr(num_output_nodes);
-    std::cout << "Number of output nodes: " << num_output_nodes << std::endl;
-    for (size_t i = 0; i < num_output_nodes; ++i) {
-        Ort::AllocatedStringPtr output_name_alloc_loop = session.GetOutputNameAllocated(i, allocator);
-        output_node_names_str[i] = output_name_alloc_loop.get();
-        output_node_names_ptr[i] = output_node_names_str[i].c_str();
-
-        Ort::TypeInfo output_type_info = session.GetOutputTypeInfo(i);
-        auto output_tensor_info_loop = output_type_info.GetTensorTypeAndShapeInfo();
-        std::vector<int64_t> output_dims_loop = output_tensor_info_loop.GetShape();
-        std::cout << "Output " << i << " Name: " << output_node_names_ptr[i] << " Dims: ";
-        util::printShape(output_dims_loop);
-        std::cout << std::endl;
-    }
+    auto output = modelutil::reportOutputs(session, allocator);
 
     // --- OpenCV Camera Setup ------------------------------------------------------------------------------------------------------------------------------------------
     Camera cam(0, 640, 480);
@@ -126,7 +89,7 @@ int main() {
 
         // 2. Create Input Tensor
         Ort::MemoryInfo memory_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
-        std::vector<int64_t> current_input_dims = {batch_size, channels, height, width};
+        std::vector<int64_t> current_input_dims = {batch, channels, height, width};
         Ort::Value input_tensor = Ort::Value::CreateTensor<float>(memory_info,
                                                                   input_tensor_values.data(),
                                                                   input_tensor_values.size(),
@@ -134,11 +97,19 @@ int main() {
                                                                   current_input_dims.size());
         
         // 3. Run Inference
+        const char* in_name = input.name.c_str();              // ← 1  single C string
+
+        std::vector<const char*> out_names;                    // ← 2  C-string array
+        out_names.reserve(output.size());
+        for (auto& s : output) out_names.push_back(s.c_str());
+
         std::vector<Ort::Value> output_tensors;
         try {
-             output_tensors = session.Run(Ort::RunOptions{nullptr},
-                                         input_node_names, &input_tensor, 1,
-                                         output_node_names_ptr.data(), num_output_nodes);
+        output_tensors = session.Run(Ort::RunOptions{nullptr},
+                                 &in_name,            // pointer to the 1-element array
+                                 &input_tensor, 1,
+                                 out_names.data(),    // pointer to first output name
+                                 out_names.size());   // number of outputs
         } catch (const Ort::Exception& e) {
             std::cerr << "ERROR during inference: " << e.what() << std::endl;
             cv::imshow(window_name, frame);
