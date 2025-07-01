@@ -36,7 +36,9 @@ add_library(uavlib STATIC
     src/classnames.cpp
     src/print_shape.cpp
     src/onnx_model.cpp
-    src/model_info.cpp)
+    src/model_info.cpp
+    src/preprocess.cpp
+    src/infer.cpp)
 
 # Public include path so anything that links against uavlib sees the headers
 # They live under <root>/lib according to your folder tree

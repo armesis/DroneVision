@@ -7,6 +7,8 @@
 #include "print_shape.hpp"
 #include "onnx_model.hpp"
 #include "model_info.hpp"
+#include "preprocess.hpp"
+#include "infer.hpp"
 #include <opencv2/opencv.hpp>
 #include <iostream>
 #include <vector>
@@ -28,21 +30,24 @@ int main() {
     OnnxModel model("./../models/yolo11n.onnx"); 
     auto& session   = model.session();               // if you need direct access
     auto& allocator = model.allocator();
-    // --- ONNX Runtime Setup -------------------------------------------------------------------------------------------------------------------------------------------
 
     // --- Get input node details ---------------------------------------------------------------------------------------------------------------------------------------
+
     modelutil::InputInfo input = modelutil::inspectInput(session, allocator);
 
     // the resolved dimensions are now in input.dims
+
     int64_t width     = input.dims.width;
     int64_t height    = input.dims.height;
     int64_t channels  = input.dims.channels;
     int64_t batch     = input.dims.batch;
 
     // --- Get output node details -------------------------------------------------------------------------------------------------------------------------------------
+
     auto output = modelutil::reportOutputs(session, allocator);
 
     // --- OpenCV Camera Setup ------------------------------------------------------------------------------------------------------------------------------------------
+
     Camera cam(0, 640, 480);
     cv::Mat frame;
 
@@ -56,6 +61,7 @@ int main() {
     std::cout << "Press 'q' in the camera window to quit." << std::endl;
 
     int frame_count_for_debug = 0; // For limiting debug prints
+
     // ... (after cv::namedWindow and before the while loop) ...
     
     while (true) {
@@ -66,28 +72,17 @@ int main() {
             break;
         }
         // Get original frame dimensions for this specific frame
+
         float frame_width_orig = static_cast<float>(frame.cols);
         float frame_height_orig = static_cast<float>(frame.rows);
 
         // 1. Preprocessing
         // 'width' and 'height' here are model input dimensions (e.g., 640x640)
-        cv::Mat resized_frame_rgb;
-        cv::Mat preprocessed_frame;
-        std::vector<float> input_tensor_values(height * width * 3);
-        cv::resize(frame, resized_frame_rgb, cv::Size(width, height));
-        cv::cvtColor(resized_frame_rgb, resized_frame_rgb, cv::COLOR_BGR2RGB);
-        resized_frame_rgb.convertTo(preprocessed_frame, CV_32F, 1.0 / 255.0);
 
-        for (int c = 0; c < channels; ++c) {
-            for (int h_img = 0; h_img < height; ++h_img) {
-                for (int w_img = 0; w_img < width; ++w_img) {
-                    input_tensor_values[c * height * width + h_img * width + w_img] =
-                        preprocessed_frame.at<cv::Vec3f>(h_img, w_img)[c];
-                }
-            }
-        }
+        auto input_tensor_values = preprocess::toTensor(frame, width, height);
 
         // 2. Create Input Tensor
+
         Ort::MemoryInfo memory_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
         std::vector<int64_t> current_input_dims = {batch, channels, height, width};
         Ort::Value input_tensor = Ort::Value::CreateTensor<float>(memory_info,
@@ -97,19 +92,13 @@ int main() {
                                                                   current_input_dims.size());
         
         // 3. Run Inference
-        const char* in_name = input.name.c_str();              // ← 1  single C string
-
-        std::vector<const char*> out_names;                    // ← 2  C-string array
-        out_names.reserve(output.size());
-        for (auto& s : output) out_names.push_back(s.c_str());
 
         std::vector<Ort::Value> output_tensors;
         try {
-        output_tensors = session.Run(Ort::RunOptions{nullptr},
-                                 &in_name,            // pointer to the 1-element array
-                                 &input_tensor, 1,
-                                 out_names.data(),    // pointer to first output name
-                                 out_names.size());   // number of outputs
+            output_tensors = infer::run(session,
+                                input.name,        // from InputInfo
+                                input_tensor,
+                                output);           // vector<string> from reportOutputs
         } catch (const Ort::Exception& e) {
             std::cerr << "ERROR during inference: " << e.what() << std::endl;
             cv::imshow(window_name, frame);
@@ -118,6 +107,7 @@ int main() {
         }
 
         // 4. Post-processing
+
         const float obj_threshold = 0.25f; // Objectness threshold for YOLOv11
         const float conf_threshold = 0.25f; // Final confidence threshold
         const float nms_threshold = 0.45f;  // Your NMS threshold
@@ -127,6 +117,7 @@ int main() {
         std::vector<int> class_ids;
 
         // Check if we have the expected single output tensor
+
         if (output_tensors.size() == 1 && output_tensors[0].IsTensor()) {
             const float* all_data_ptr = output_tensors[0].GetTensorData<float>();
             auto output_shape = output_tensors[0].GetTensorTypeAndShapeInfo().GetShape();
@@ -134,10 +125,12 @@ int main() {
             // output_shape should be [batch_size, num_potential_detections, num_attributes]
             // For Ultralytics YOLO export without postprocessing the last dimension is
             // (num_classes + 5) -> [objectness, cx, cy, w, h, class scores]
+
             const int64_t num_potential_detections = output_shape[1];
             const int64_t attributes_per_detection = output_shape[2];
 
             // Infer number of classes from the output shape
+
             const int inferred_num_classes = static_cast<int>(attributes_per_detection - 5);
 
             if (inferred_num_classes != CLASS_NAMES.size()) {
@@ -151,6 +144,7 @@ int main() {
             }
             // Let's proceed assuming CLASS_NAMES.size() is the true number of classes the model was trained for,
             // and the model output reflects this.
+
             const int num_classes_to_iterate = static_cast<int>(CLASS_NAMES.size());
 
 
@@ -158,6 +152,7 @@ int main() {
             float model_input_height_float = static_cast<float>(height); // Model input height (e.g., 640)
 
             // Each detection row is [obj, cx, cy, w, h, class_scores...]
+
             for (int i = 0; i < num_potential_detections; ++i) {
                 const float* current_detection_data = all_data_ptr + i * attributes_per_detection;
 
