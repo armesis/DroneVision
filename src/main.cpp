@@ -119,27 +119,20 @@ int main() {
         if (output_tensors.size() == 1 && output_tensors[0].IsTensor()) {
             
             auto shape   = output_tensors[0].GetTensorTypeAndShapeInfo().GetShape();
-            const float* base = output_tensors[0].GetTensorData<float>();
-            
-
-
-
+            const float* base = output_tensors[0].GetTensorData<float>();    //          <----     optimize the resolution of the data from the output tensor here !
             int64_t NC = CLASS_NAMES.size();
 
 
-            const int EXP_ROW   = NC + 5;          // 85 for COCO
             const int EXP_ROW_N = NC + 4;          // 84 when no obj score
 
-            int64_t D      = shape[1];
-            int64_t STRIDE = shape[2];
+            int64_t D      = shape[2];
+            int64_t STRIDE = shape[1];
 
-            if (STRIDE != EXP_ROW && STRIDE != EXP_ROW_N) {
+            if (STRIDE != EXP_ROW_N) {
+                std::cout << STRIDE << std::endl;
                 std::cerr << "Unexpected output stride\n";
                 return 0;
             }
-
-            bool has_obj_score = (STRIDE == EXP_ROW);
-
 
             float model_input_width_float = static_cast<float>(width);  // Model input width (640)
             float model_input_height_float = static_cast<float>(height); // Model input height (640)
@@ -149,9 +142,15 @@ int main() {
             // (num_classes + 5) -> [objectness, cx, cy, w, h, class scores]
 
             for (int i = 0; i < D; ++i) {
-                const float* row = base + i * STRIDE;
-                int cls_offset = has_obj_score ? 5 : 4; // adjust for objectness
+                const float* row = nullptr;
+                std::vector<float> row_buf;
 
+                row_buf.resize(STRIDE);
+                for (int a = 0; a < STRIDE; ++a)
+                    row_buf[a] = base[a * D + i];       // gather attribute a for det i
+                row = row_buf.data();
+
+                int cls_offset = 4; // adjust for objectness
 
                 const float* cls = row + cls_offset;
                 int best_id      = std::max_element(cls, cls + NC) - cls;
