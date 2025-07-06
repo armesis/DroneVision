@@ -121,42 +121,24 @@ int main() {
             auto shape   = output_tensors[0].GetTensorTypeAndShapeInfo().GetShape();
             const float* base = output_tensors[0].GetTensorData<float>();
             
-            int64_t ATTR = shape[1];          // 84
-            int64_t DETS = shape[2];          // 8400
-
-            int det_id = 0;                   // ← pick the column you want for debugging
 
 
-            int64_t B = shape[0];
-            int64_t D = 0;                      // will hold the true detection count
-            int64_t STRIDE;                     // 85 in the normal case
+
             int64_t NC = CLASS_NAMES.size();
 
 
             const int EXP_ROW   = NC + 5;          // 85 for COCO
             const int EXP_ROW_N = NC + 4;          // 84 when no obj score
 
-            bool layout_B84D = false;
-            if (shape.size() == 3)
-            {
-                    D      = shape[1];
-                    STRIDE = EXP_ROW;
-                }
-                    D      = shape[2];
-                    STRIDE = EXP_ROW;
-                }
-                    D      = shape[2] / EXP_ROW;
-                    STRIDE = EXP_ROW;
-                }
-                    D      = shape[2];
-                    STRIDE = EXP_ROW_N;
-                    layout_B84D = true;
-                }
-                else {
-                    std::cerr << "Unhandled 3-D output shape\n";
-                    return 0;
-                }
+            int64_t D      = shape[1];
+            int64_t STRIDE = shape[2];
+
+            if (STRIDE != EXP_ROW && STRIDE != EXP_ROW_N) {
+                std::cerr << "Unexpected output stride\n";
+                return 0;
             }
+
+            bool has_obj_score = (STRIDE == EXP_ROW);
 
 
             float model_input_width_float = static_cast<float>(width);  // Model input width (640)
@@ -167,17 +149,8 @@ int main() {
             // (num_classes + 5) -> [objectness, cx, cy, w, h, class scores]
 
             for (int i = 0; i < D; ++i) {
-                const float* row = nullptr;
-                std::vector<float> row_buf;
-                if (layout_B84D) {
-                    row_buf.resize(STRIDE);
-                    for (int a = 0; a < STRIDE; ++a)
-                        row_buf[a] = base[a * D + i];       // gather attribute a for det i
-                    row = row_buf.data();
-                } else {
-                    row = base + i * STRIDE;
-                }
-                int cls_offset = 4; // cx,cy,w,h then classes
+                const float* row = base + i * STRIDE;
+                int cls_offset = has_obj_score ? 5 : 4; // adjust for objectness
 
 
                 const float* cls = row + cls_offset;
