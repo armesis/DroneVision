@@ -108,9 +108,9 @@ int main() {
 
         // 4. Post-processing
 
-        const float obj_threshold = 0.25f; // Objectness threshold for YOLOv11
-        const float conf_threshold = 0.25f; // Final confidence threshold
-        const float nms_threshold = 0.45f;  // Your NMS threshold
+        const float obj_threshold = 0.95f; // Objectness threshold for YOLOv11
+        const float conf_threshold = 630.0f; // Final confidence threshold
+        const float nms_threshold = 0.1f;  // Your NMS threshold
 
         std::vector<cv::Rect> bboxes;
         std::vector<float> scores;
@@ -119,67 +119,96 @@ int main() {
         // Check if we have the expected single output tensor
 
         if (output_tensors.size() == 1 && output_tensors[0].IsTensor()) {
-            const float* all_data_ptr = output_tensors[0].GetTensorData<float>();
-            auto output_shape = output_tensors[0].GetTensorTypeAndShapeInfo().GetShape();
+            
+            auto shape   = output_tensors[0].GetTensorTypeAndShapeInfo().GetShape();
+            const float* base = output_tensors[0].GetTensorData<float>();
+            
+            int64_t ATTR = shape[1];          // 84
+            int64_t DETS = shape[2];          // 8400
 
-            // output_shape should be [batch_size, num_potential_detections, num_attributes]
-            // For Ultralytics YOLO export without postprocessing the last dimension is
-            // (num_classes + 5) -> [objectness, cx, cy, w, h, class scores]
+            int det_id = 0;                   // ← pick the column you want
 
-            const int64_t num_potential_detections = output_shape[1];
-            const int64_t attributes_per_detection = output_shape[2];
-
-            // Infer number of classes from the output shape
-
-            const int inferred_num_classes = static_cast<int>(attributes_per_detection - 5);
-
-            if (inferred_num_classes != CLASS_NAMES.size()) {
-                std::cerr << "WARNING: Model's inferred number of classes (" << inferred_num_classes
-                          << ") does not match CLASS_NAMES size (" << CLASS_NAMES.size()
-                          << "). Check your CLASS_NAMES vector or model output structure." << std::endl;
-                // Decide how to handle this: proceed with inferred_num_classes and risk label mismatch,
-                // or use CLASS_NAMES.size() and risk reading out of bounds if inferred_num_classes is smaller.
-                // For safety, it's often better to use the smaller of the two for loops,
-                // but ensure CLASS_NAMES is correct for the model.
+            std::cout << "Detection " << det_id << " (84 numbers):\n";
+            for (int a = 0; a < ATTR; ++a)
+            {
+                float v = base[a * DETS + det_id];   // [attr , det_id]
+                std::cout << std::setw(10) << v;     // pretty-print
+                if ((a + 1) % 8 == 0) std::cout << '\n';
             }
-            // Let's proceed assuming CLASS_NAMES.size() is the true number of classes the model was trained for,
-            // and the model output reflects this.
+            std::cout << std::endl;
 
-            const int num_classes_to_iterate = static_cast<int>(CLASS_NAMES.size());
+            int64_t B = shape[0];
+            int64_t D = 0;                      // will hold the true detection count
+            int64_t STRIDE;                     // 85 in the normal case
+            int64_t NC = CLASS_NAMES.size();
+
+            std::cout << "Raw output shape = [ ";
+            for (auto v : shape) std::cout << v << ' ';
+            std::cout << "]\n";
+
+            const int EXP_ROW   = NC + 5;          // 85 for COCO
+            const int EXP_ROW_N = NC + 4;          // 84 when no obj score
+
+            if (shape.size() == 3)
+            {
+                if (shape[2] == EXP_ROW) {         // [B, D, 85]
+                    D      = shape[1];
+                    STRIDE = EXP_ROW;
+                    std::cout << "[B, D, 85]" << std::endl;
+                }
+                else if (shape[1] == EXP_ROW) {    // [B, 85, D]
+                    D      = shape[2];
+                    STRIDE = EXP_ROW;
+                    std::cout << "[B, 85, D]" << std::endl;
+                }
+                else if (shape[1] == 1 && shape[2] % EXP_ROW == 0) { // [B,1,flat]
+                    D      = shape[2] / EXP_ROW;
+                    STRIDE = EXP_ROW;
+                    std::cout << "[B,1,flat]" << std::endl;
+                }
+                else if (shape[1] == EXP_ROW_N) {  // [B, 84, D]  ← your case
+                    D      = shape[2];
+                    STRIDE = EXP_ROW_N;
+                    std::cout << "[B, 84, D]" << std::endl;
+                }
+                else {
+                    std::cerr << "Unhandled 3-D output shape\n";
+                    return 0;
+                }
+            }
 
 
             float model_input_width_float = static_cast<float>(width);  // Model input width (e.g., 640)
             float model_input_height_float = static_cast<float>(height); // Model input height (e.g., 640)
 
-            // Each detection row is [obj, cx, cy, w, h, class_scores...]
+            // output_shape should be [batch_size, num_potential_detections, num_attributes]
+            // For Ultralytics YOLO export without postprocessing the last dimension is
+            // (num_classes + 5) -> [objectness, cx, cy, w, h, class scores]
 
-            for (int i = 0; i < num_potential_detections; ++i) {
-                const float* current_detection_data = all_data_ptr + i * attributes_per_detection;
+            for (int i = 0; i < D; ++i) {
+                const float* row = base + i * STRIDE;
 
-                float objectness = current_detection_data[0];
-                if (objectness < obj_threshold) {
-                    continue;
+                float objectness = 1.0f;               // default when no explicit obj score
+                int   cls_offset = 4;                  // cx,cy,w,h then classes
+
+                if (STRIDE == EXP_ROW) {               // full 85 layout
+                    objectness = row[0];
+                    cls_offset = 5;
                 }
+                if (objectness < obj_threshold) continue;
 
-                float max_class_score = 0.0f;
-                int best_class_id = -1;
-                const float* class_scores_ptr = current_detection_data + 5;
-                for (int j = 0; j < num_classes_to_iterate && j < inferred_num_classes; ++j) {
-                    if (class_scores_ptr[j] > max_class_score) {
-                        max_class_score = class_scores_ptr[j];
-                        best_class_id = j;
-                    }
-                }
+                const float* cls = row + cls_offset;
+                int best_id      = std::max_element(cls, cls + NC) - cls;
+                float conf       = objectness * cls[best_id];
+                
+                if (conf < conf_threshold) continue;
+                std::cout << "the confidence is " << conf << " and the cls[best_id] is " << cls[best_id] << " and finally the object is a " << CLASS_NAMES[best_id] <<std::endl;
+                std::cout << row << std::endl;
 
-                float conf = objectness * max_class_score;
-                if (conf < conf_threshold) {
-                    continue;
-                }
-
-                float cx_model = current_detection_data[1];
-                float cy_model = current_detection_data[2];
-                float w_model  = current_detection_data[3];
-                float h_model  = current_detection_data[4];
+                float cx_model = row[1];
+                float cy_model = row[2];
+                float w_model  = row[3];
+                float h_model  = row[4];
 
                 float x1_model = cx_model - w_model / 2.0f;
                 float y1_model = cy_model - h_model / 2.0f;
@@ -198,9 +227,10 @@ int main() {
                 if (box_orig.width > 0 && box_orig.height > 0) {
                     bboxes.push_back(box_orig);
                     scores.push_back(conf);
-                    class_ids.push_back(best_class_id);
+                    class_ids.push_back(best_id);
                 }
             }
+            std::cout << "Ha\n" << std::endl;
 
             // --- Per-Class NMS (Your existing logic should still work if bboxes, scores, class_ids are filled correctly) ---
             std::vector<int> final_kept_indices;
@@ -222,7 +252,8 @@ int main() {
                         original_indices_for_class.push_back(static_cast<int>(i));
                     }
                 }
-
+                const int TOP_K = 1;                // keep at most 1 per class
+                
                 if (!bboxes_for_class.empty()) {
                     std::vector<int> nms_result_indices_for_class;
                     cv::dnn::NMSBoxes(bboxes_for_class, scores_for_class, conf_threshold, nms_threshold, nms_result_indices_for_class);
@@ -230,6 +261,8 @@ int main() {
                     for (int temp_idx : nms_result_indices_for_class) {
                         final_kept_indices.push_back(original_indices_for_class[temp_idx]);
                     }
+                    if (final_kept_indices.size() > TOP_K)
+                        final_kept_indices.resize(TOP_K);
                 }
             }
             
