@@ -1,5 +1,5 @@
 
-// YOLO_NAS runner ----------------------------------------------
+// YOLO_NAS runner
 
 #include "camera.hpp"
 #include "draw.hpp"
@@ -25,28 +25,28 @@ const auto& CLASS_NAMES = cocoClassNames();
 
 int main() {
 
-    // --- ONNX Runtime Setup -------------------------------------------------------------------------------------------------------------------------------------------
+    // ONNX Runtime setup
 
     OnnxModel model("./../models/yolo11n.onnx"); 
     auto& session   = model.session();               // if you need direct access
     auto& allocator = model.allocator();
 
-    // --- Get input node details ---------------------------------------------------------------------------------------------------------------------------------------
+    // Get input node details
 
     modelutil::InputInfo input = modelutil::inspectInput(session, allocator);
 
-    // the resolved dimensions are now in input.dims
+    // Resolved input dimensions
 
     int64_t width     = input.dims.width;
     int64_t height    = input.dims.height;
     int64_t channels  = input.dims.channels;
     int64_t batch     = input.dims.batch;
 
-    // --- Get output node details -------------------------------------------------------------------------------------------------------------------------------------
+    // Get output node details
 
     auto output = modelutil::reportOutputs(session, allocator);
 
-    // --- OpenCV Camera Setup ------------------------------------------------------------------------------------------------------------------------------------------
+    // Camera setup
 
     Camera cam(0, 640, 480);
     cv::Mat frame;
@@ -62,7 +62,6 @@ int main() {
 
     int frame_count_for_debug = 0; // For limiting debug prints
 
-    // ... (after cv::namedWindow and before the while loop) ...
     
     while (true) {
         if (!cam.grabFrame(frame)) break;
@@ -71,13 +70,13 @@ int main() {
             std::cerr << "ERROR: Captured empty frame" << std::endl;
             break;
         }
-        // Get original frame dimensions for this specific frame
+        // Get frame dimensions
 
         float frame_width_orig = static_cast<float>(frame.cols);
         float frame_height_orig = static_cast<float>(frame.rows);
 
-        // 1. Preprocessing
-        // 'width' and 'height' here are model input dimensions (e.g., 640x640)
+        // 1. Preprocess input
+        // model input size
 
         auto input_tensor_values = preprocess::toTensor(frame, width, height);
 
@@ -108,7 +107,6 @@ int main() {
 
         // 4. Post-processing
 
-        // const float obj_threshold = 1.0f; // Objectness threshold for YOLOv11
         const float conf_threshold = 0.45f; // Final confidence threshold
         const float nms_threshold = 0.95f;  // Your NMS threshold
 
@@ -128,26 +126,12 @@ int main() {
 
             int det_id = 0;                   // ← pick the column you want for debugging
 
-            // Example debug print for a single detection column
-            /*
-            std::cout << "Detection " << det_id << " (" << ATTR << " numbers):\n";
-            for (int a = 0; a < ATTR; ++a) {
-                float v = base[a * DETS + det_id];   // [attr , det_id]
-                std::cout << std::setw(10) << v;
-                if ((a + 1) % 8 == 0) std::cout << '\n';
-            }
-            std::cout << std::endl;
-            */
 
             int64_t B = shape[0];
             int64_t D = 0;                      // will hold the true detection count
             int64_t STRIDE;                     // 85 in the normal case
             int64_t NC = CLASS_NAMES.size();
 
-            // Debug: print raw output tensor shape
-            // std::cout << "Raw output shape = [ ";
-            // for (auto v : shape) std::cout << v << ' ';
-            // std::cout << "]\n";
 
             const int EXP_ROW   = NC + 5;          // 85 for COCO
             const int EXP_ROW_N = NC + 4;          // 84 when no obj score
@@ -155,26 +139,18 @@ int main() {
             bool layout_B84D = false;
             if (shape.size() == 3)
             {
-                if (shape[2] == EXP_ROW) {         // [B, D, 85]
                     D      = shape[1];
                     STRIDE = EXP_ROW;
-                    // std::cout << "[B, D, 85]" << std::endl;
                 }
-                else if (shape[1] == EXP_ROW) {    // [B, 85, D]
                     D      = shape[2];
                     STRIDE = EXP_ROW;
-                    // std::cout << "[B, 85, D]" << std::endl;
                 }
-                else if (shape[1] == 1 && shape[2] % EXP_ROW == 0) { // [B,1,flat]
                     D      = shape[2] / EXP_ROW;
                     STRIDE = EXP_ROW;
-                    // std::cout << "[B,1,flat]" << std::endl;
                 }
-                else if (shape[1] == EXP_ROW_N) {  // [B, 84, D]
                     D      = shape[2];
                     STRIDE = EXP_ROW_N;
                     layout_B84D = true;
-                    std::cout << "[B, 84, D]" << std::endl;
                 }
                 else {
                     std::cerr << "Unhandled 3-D output shape\n";
@@ -183,11 +159,11 @@ int main() {
             }
 
 
-            float model_input_width_float = static_cast<float>(width);  // Model input width (e.g., 640)
-            float model_input_height_float = static_cast<float>(height); // Model input height (e.g., 640)
+            float model_input_width_float = static_cast<float>(width);  // Model input width (640)
+            float model_input_height_float = static_cast<float>(height); // Model input height (640)
 
-            // output_shape should be [batch_size, num_potential_detections, num_attributes]
-            // For Ultralytics YOLO export without postprocessing the last dimension is
+            // Output shape: [batch, detections, attributes]
+            // Last dimension:
             // (num_classes + 5) -> [objectness, cx, cy, w, h, class scores]
 
             for (int i = 0; i < D; ++i) {
@@ -201,30 +177,20 @@ int main() {
                 } else {
                     row = base + i * STRIDE;
                 }
+                int cls_offset = 4; // cx,cy,w,h then classes
 
-                // float objectness = 1.0f;               // default when no explicit obj score
-                int   cls_offset = 4;                  // cx,cy,w,h then classes
-
-                /* if (!layout_B84D && STRIDE == EXP_ROW) { // full 85 layout
-                    objectness = row[0];
-                    cls_offset = 5;
-                }*/
-                // if (objectness < obj_threshold) continue;
-                // std::cout << "objectness = " << objectness << std::endl;
 
                 const float* cls = row + cls_offset;
                 int best_id      = std::max_element(cls, cls + NC) - cls;
                 float conf       = cls[best_id];
                 
                 if (conf < conf_threshold) continue;
-                std::cout << "conf = " << conf << std::endl;
 
                 float cx_model = row[0];
                 float cy_model = row[1];
                 float w_model  = row[2];
                 float h_model  = row[3];
 
-                std::cout << "center x = " << cx_model << " center y = " << cy_model << " width = " << w_model << " height = " << h_model << "   and The object is a : " << CLASS_NAMES[best_id] << std::endl;
 
                 float x1_model = cx_model - w_model / 2.0f;
                 float y1_model = cy_model - h_model / 2.0f;
@@ -241,16 +207,13 @@ int main() {
                 box_orig &= cv::Rect(0, 0, static_cast<int>(frame_width_orig), static_cast<int>(frame_height_orig));
 
                 if (box_orig.width > 0 && box_orig.height > 0) {
-                    std::cout << " we have a box ! " << std::endl;
                     bboxes.push_back(box_orig);
                     scores.push_back(conf);
                     class_ids.push_back(best_id);
                 }
             }
-            // Debug marker
-            std::cout << "Ha" << std::endl;
 
-            // --- Per-Class NMS (Your existing logic should still work if bboxes, scores, class_ids are filled correctly) ---
+            // Per-class NMS
             std::vector<int> final_kept_indices;
             std::vector<int> unique_class_ids = class_ids;
             std::sort(unique_class_ids.begin(), unique_class_ids.end());
@@ -284,7 +247,7 @@ int main() {
                 }
             }
             
-            // --- Draw the final Detections using final_kept_indices ---
+            // Draw final detections
             std::vector<cv::Rect> final_boxes;
             std::vector<float> final_scores;
             std::vector<int> final_ids;
@@ -297,7 +260,6 @@ int main() {
             }
 
             draw::detections(frame, final_boxes, final_scores, final_ids, CLASS_NAMES);
-            // --- END Section A ---
 
         } else {
              cv::putText(frame, "Output tensor issue or no detections", cv::Point(10, 60), // Moved down
