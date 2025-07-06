@@ -108,9 +108,9 @@ int main() {
 
         // 4. Post-processing
 
-        const float obj_threshold = 0.95f; // Objectness threshold for YOLOv11
-        const float conf_threshold = 630.0f; // Final confidence threshold
-        const float nms_threshold = 0.1f;  // Your NMS threshold
+        const float obj_threshold = 0.25f; // Objectness threshold for YOLOv11
+        const float conf_threshold = 0.25f; // Final confidence threshold
+        const float nms_threshold = 0.45f;  // Your NMS threshold
 
         std::vector<cv::Rect> bboxes;
         std::vector<float> scores;
@@ -126,50 +126,55 @@ int main() {
             int64_t ATTR = shape[1];          // 84
             int64_t DETS = shape[2];          // 8400
 
-            int det_id = 0;                   // ← pick the column you want
+            int det_id = 0;                   // ← pick the column you want for debugging
 
-            std::cout << "Detection " << det_id << " (84 numbers):\n";
-            for (int a = 0; a < ATTR; ++a)
-            {
+            // Example debug print for a single detection column
+            /*
+            std::cout << "Detection " << det_id << " (" << ATTR << " numbers):\n";
+            for (int a = 0; a < ATTR; ++a) {
                 float v = base[a * DETS + det_id];   // [attr , det_id]
-                std::cout << std::setw(10) << v;     // pretty-print
+                std::cout << std::setw(10) << v;
                 if ((a + 1) % 8 == 0) std::cout << '\n';
             }
             std::cout << std::endl;
+            */
 
             int64_t B = shape[0];
             int64_t D = 0;                      // will hold the true detection count
             int64_t STRIDE;                     // 85 in the normal case
             int64_t NC = CLASS_NAMES.size();
 
-            std::cout << "Raw output shape = [ ";
-            for (auto v : shape) std::cout << v << ' ';
-            std::cout << "]\n";
+            // Debug: print raw output tensor shape
+            // std::cout << "Raw output shape = [ ";
+            // for (auto v : shape) std::cout << v << ' ';
+            // std::cout << "]\n";
 
             const int EXP_ROW   = NC + 5;          // 85 for COCO
             const int EXP_ROW_N = NC + 4;          // 84 when no obj score
 
+            bool layout_B84D = false;
             if (shape.size() == 3)
             {
                 if (shape[2] == EXP_ROW) {         // [B, D, 85]
                     D      = shape[1];
                     STRIDE = EXP_ROW;
-                    std::cout << "[B, D, 85]" << std::endl;
+                    // std::cout << "[B, D, 85]" << std::endl;
                 }
                 else if (shape[1] == EXP_ROW) {    // [B, 85, D]
                     D      = shape[2];
                     STRIDE = EXP_ROW;
-                    std::cout << "[B, 85, D]" << std::endl;
+                    // std::cout << "[B, 85, D]" << std::endl;
                 }
                 else if (shape[1] == 1 && shape[2] % EXP_ROW == 0) { // [B,1,flat]
                     D      = shape[2] / EXP_ROW;
                     STRIDE = EXP_ROW;
-                    std::cout << "[B,1,flat]" << std::endl;
+                    // std::cout << "[B,1,flat]" << std::endl;
                 }
-                else if (shape[1] == EXP_ROW_N) {  // [B, 84, D]  ← your case
+                else if (shape[1] == EXP_ROW_N) {  // [B, 84, D]
                     D      = shape[2];
                     STRIDE = EXP_ROW_N;
-                    std::cout << "[B, 84, D]" << std::endl;
+                    layout_B84D = true;
+                    // std::cout << "[B, 84, D]" << std::endl;
                 }
                 else {
                     std::cerr << "Unhandled 3-D output shape\n";
@@ -186,12 +191,21 @@ int main() {
             // (num_classes + 5) -> [objectness, cx, cy, w, h, class scores]
 
             for (int i = 0; i < D; ++i) {
-                const float* row = base + i * STRIDE;
+                const float* row = nullptr;
+                std::vector<float> row_buf;
+                if (layout_B84D) {
+                    row_buf.resize(STRIDE);
+                    for (int a = 0; a < STRIDE; ++a)
+                        row_buf[a] = base[a * D + i];       // gather attribute a for det i
+                    row = row_buf.data();
+                } else {
+                    row = base + i * STRIDE;
+                }
 
                 float objectness = 1.0f;               // default when no explicit obj score
                 int   cls_offset = 4;                  // cx,cy,w,h then classes
 
-                if (STRIDE == EXP_ROW) {               // full 85 layout
+                if (!layout_B84D && STRIDE == EXP_ROW) { // full 85 layout
                     objectness = row[0];
                     cls_offset = 5;
                 }
@@ -202,8 +216,6 @@ int main() {
                 float conf       = objectness * cls[best_id];
                 
                 if (conf < conf_threshold) continue;
-                std::cout << "the confidence is " << conf << " and the cls[best_id] is " << cls[best_id] << " and finally the object is a " << CLASS_NAMES[best_id] <<std::endl;
-                std::cout << row << std::endl;
 
                 float cx_model = row[1];
                 float cy_model = row[2];
@@ -230,7 +242,8 @@ int main() {
                     class_ids.push_back(best_id);
                 }
             }
-            std::cout << "Ha\n" << std::endl;
+            // Debug marker
+            // std::cout << "Ha" << std::endl;
 
             // --- Per-Class NMS (Your existing logic should still work if bboxes, scores, class_ids are filled correctly) ---
             std::vector<int> final_kept_indices;
