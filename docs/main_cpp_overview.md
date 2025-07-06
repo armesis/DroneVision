@@ -32,3 +32,6 @@ between boxes that will be kept; lower values remove more overlapping detections
 indices are remapped to the original detection list and stored in
 `final_kept_indices`, which determines which boxes should ultimately be drawn.
 
+For an explanation of the helper classes used by this code see
+`library_overview.md`.
+

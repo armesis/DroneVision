@@ -27,3 +27,6 @@ DroneVision/
 - **build/** – Compiled output; should be listed in `.gitignore` so it is not checked in.
 
 This layout keeps version-controlled files small and clearly separates code from generated artifacts.
+
+See also `main_cpp_overview.md` for a description of the application logic and
+`library_overview.md` for details about the helper library.
