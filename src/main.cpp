@@ -108,9 +108,9 @@ int main() {
 
         // 4. Post-processing
 
-        const float obj_threshold = 0.25f; // Objectness threshold for YOLOv11
-        const float conf_threshold = 0.25f; // Final confidence threshold
-        const float nms_threshold = 0.45f;  // Your NMS threshold
+        // const float obj_threshold = 1.0f; // Objectness threshold for YOLOv11
+        const float conf_threshold = 0.75f; // Final confidence threshold
+        const float nms_threshold = 0.91f;  // Your NMS threshold
 
         std::vector<cv::Rect> bboxes;
         std::vector<float> scores;
@@ -174,7 +174,7 @@ int main() {
                     D      = shape[2];
                     STRIDE = EXP_ROW_N;
                     layout_B84D = true;
-                    // std::cout << "[B, 84, D]" << std::endl;
+                    std::cout << "[B, 84, D]" << std::endl;
                 }
                 else {
                     std::cerr << "Unhandled 3-D output shape\n";
@@ -202,25 +202,29 @@ int main() {
                     row = base + i * STRIDE;
                 }
 
-                float objectness = 1.0f;               // default when no explicit obj score
+                // float objectness = 1.0f;               // default when no explicit obj score
                 int   cls_offset = 4;                  // cx,cy,w,h then classes
 
-                if (!layout_B84D && STRIDE == EXP_ROW) { // full 85 layout
+                /* if (!layout_B84D && STRIDE == EXP_ROW) { // full 85 layout
                     objectness = row[0];
                     cls_offset = 5;
-                }
-                if (objectness < obj_threshold) continue;
+                }*/
+                // if (objectness < obj_threshold) continue;
+                // std::cout << "objectness = " << objectness << std::endl;
 
                 const float* cls = row + cls_offset;
                 int best_id      = std::max_element(cls, cls + NC) - cls;
-                float conf       = objectness * cls[best_id];
+                float conf       = cls[best_id];
                 
                 if (conf < conf_threshold) continue;
+                std::cout << "conf = " << conf << std::endl;
 
-                float cx_model = row[1];
-                float cy_model = row[2];
-                float w_model  = row[3];
-                float h_model  = row[4];
+                float cx_model = row[0];
+                float cy_model = row[1];
+                float w_model  = row[2];
+                float h_model  = row[3];
+
+                std::cout << "center x = " << cx_model << " center y = " << cy_model << " width = " << w_model << " height = " << h_model << std::endl;
 
                 float x1_model = cx_model - w_model / 2.0f;
                 float y1_model = cy_model - h_model / 2.0f;
@@ -237,6 +241,7 @@ int main() {
                 box_orig &= cv::Rect(0, 0, static_cast<int>(frame_width_orig), static_cast<int>(frame_height_orig));
 
                 if (box_orig.width > 0 && box_orig.height > 0) {
+                    std::cout << " we have a box ! " << std::endl;
                     bboxes.push_back(box_orig);
                     scores.push_back(conf);
                     class_ids.push_back(best_id);
