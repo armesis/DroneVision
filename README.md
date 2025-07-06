@@ -25,3 +25,25 @@ Key points:
 - Document design decisions and usage instructions in `docs/`.
 
 These changes make it easier to navigate the repository and separate generated files from source code.
+
+## Building the Example
+
+The project uses CMake. From the repository root run:
+
+```bash
+cmake -S . -B build
+cmake --build build
+```
+
+The resulting executable `live_camera_app` will appear inside the `build/`
+directory. Run it with:
+
+```bash
+./build/live_camera_app
+```
+
+Make sure the `ONNXRUNTIME_ROOTDIR` variable in `CMakeLists.txt` points to your
+local ONNX Runtime installation.
+
+Additional documentation can be found under the `docs/` directory, including a
+walkthrough of `src/main.cpp` and an overview of the helper library.
