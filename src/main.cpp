@@ -109,8 +109,8 @@ int main() {
         // 4. Post-processing
 
         // const float obj_threshold = 1.0f; // Objectness threshold for YOLOv11
-        const float conf_threshold = 0.75f; // Final confidence threshold
-        const float nms_threshold = 1.0f;  // Your NMS threshold
+        const float conf_threshold = 0.45f; // Final confidence threshold
+        const float nms_threshold = 0.95f;  // Your NMS threshold
 
         std::vector<cv::Rect> bboxes;
         std::vector<float> scores;
@@ -224,7 +224,7 @@ int main() {
                 float w_model  = row[2];
                 float h_model  = row[3];
 
-                std::cout << "center x = " << cx_model << " center y = " << cy_model << " width = " << w_model << " height = " << h_model << std::endl;
+                std::cout << "center x = " << cx_model << " center y = " << cy_model << " width = " << w_model << " height = " << h_model << "   and The object is a : " << CLASS_NAMES[best_id] << std::endl;
 
                 float x1_model = cx_model - w_model / 2.0f;
                 float y1_model = cy_model - h_model / 2.0f;
@@ -248,7 +248,7 @@ int main() {
                 }
             }
             // Debug marker
-            // std::cout << "Ha" << std::endl;
+            std::cout << "Ha" << std::endl;
 
             // --- Per-Class NMS (Your existing logic should still work if bboxes, scores, class_ids are filled correctly) ---
             std::vector<int> final_kept_indices;
@@ -270,7 +270,7 @@ int main() {
                         original_indices_for_class.push_back(static_cast<int>(i));
                     }
                 }
-                const int TOP_K = 1;                // keep at most 1 per class
+                const int TOP_K = 10;                // keep at most 10 per class
                 
                 if (!bboxes_for_class.empty()) {
                     std::vector<int> nms_result_indices_for_class;
