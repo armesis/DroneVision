@@ -1,5 +1,5 @@
 
-// YOLO_NAS runner ----------------------------------------------
+// YOLO_NAS runner
 
 #include "camera.hpp"
 #include "draw.hpp"
@@ -25,28 +25,28 @@ const auto& CLASS_NAMES = cocoClassNames();
 
 int main() {
 
-    // --- ONNX Runtime Setup -------------------------------------------------------------------------------------------------------------------------------------------
+    // ONNX Runtime setup
 
     OnnxModel model("./../models/yolo11n.onnx"); 
     auto& session   = model.session();               // if you need direct access
     auto& allocator = model.allocator();
 
-    // --- Get input node details ---------------------------------------------------------------------------------------------------------------------------------------
+    // Get input node details
 
     modelutil::InputInfo input = modelutil::inspectInput(session, allocator);
 
-    // the resolved dimensions are now in input.dims
+    // Resolved input dimensions
 
     int64_t width     = input.dims.width;
     int64_t height    = input.dims.height;
     int64_t channels  = input.dims.channels;
     int64_t batch     = input.dims.batch;
 
-    // --- Get output node details -------------------------------------------------------------------------------------------------------------------------------------
+    // Get output node details
 
     auto output = modelutil::reportOutputs(session, allocator);
 
-    // --- OpenCV Camera Setup ------------------------------------------------------------------------------------------------------------------------------------------
+    // Camera setup
 
     Camera cam(0, 640, 480);
     cv::Mat frame;
@@ -62,7 +62,6 @@ int main() {
 
     int frame_count_for_debug = 0; // For limiting debug prints
 
-    // ... (after cv::namedWindow and before the while loop) ...
     
     while (true) {
         if (!cam.grabFrame(frame)) break;
@@ -71,13 +70,13 @@ int main() {
             std::cerr << "ERROR: Captured empty frame" << std::endl;
             break;
         }
-        // Get original frame dimensions for this specific frame
+        // Get frame dimensions
 
         float frame_width_orig = static_cast<float>(frame.cols);
         float frame_height_orig = static_cast<float>(frame.rows);
 
-        // 1. Preprocessing
-        // 'width' and 'height' here are model input dimensions (e.g., 640x640)
+        // 1. Preprocess input
+        // model input size
 
         auto input_tensor_values = preprocess::toTensor(frame, width, height);
 
@@ -108,7 +107,6 @@ int main() {
 
         // 4. Post-processing
 
-        // const float obj_threshold = 1.0f; // Objectness threshold for YOLOv11
         const float conf_threshold = 0.45f; // Final confidence threshold
         const float nms_threshold = 0.95f;  // Your NMS threshold
 
@@ -138,8 +136,8 @@ int main() {
             float model_input_width_float = static_cast<float>(width);  // Model input width (e.g., 640)
             float model_input_height_float = static_cast<float>(height); // Model input height (e.g., 640)
 
-            // output_shape should be [batch_size, num_potential_detections, num_attributes]
-            // For Ultralytics YOLO export without postprocessing the last dimension is
+            // Output shape: [batch, detections, attributes]
+            // Last dimension:
             // (num_classes + 5) -> [objectness, cx, cy, w, h, class scores]
 
             std::vector<float> row_buf(STRIDE);
@@ -156,14 +154,12 @@ int main() {
                 float conf       = cls[best_id];
                 
                 if (conf < conf_threshold) continue;
-                std::cout << "conf = " << conf << std::endl;
 
                 float cx_model = row[0];
                 float cy_model = row[1];
                 float w_model  = row[2];
                 float h_model  = row[3];
 
-                std::cout << "center x = " << cx_model << " center y = " << cy_model << " width = " << w_model << " height = " << h_model << "   and The object is a : " << CLASS_NAMES[best_id] << std::endl;
 
                 float x1_model = cx_model - w_model / 2.0f;
                 float y1_model = cy_model - h_model / 2.0f;
@@ -180,16 +176,13 @@ int main() {
                 box_orig &= cv::Rect(0, 0, static_cast<int>(frame_width_orig), static_cast<int>(frame_height_orig));
 
                 if (box_orig.width > 0 && box_orig.height > 0) {
-                    std::cout << " we have a box ! " << std::endl;
                     bboxes.push_back(box_orig);
                     scores.push_back(conf);
                     class_ids.push_back(best_id);
                 }
             }
-            // Debug marker
-            std::cout << "Ha" << std::endl;
 
-            // --- Per-Class NMS (Your existing logic should still work if bboxes, scores, class_ids are filled correctly) ---
+            // Per-class NMS
             std::vector<int> final_kept_indices;
             std::vector<int> unique_class_ids = class_ids;
             std::sort(unique_class_ids.begin(), unique_class_ids.end());
@@ -223,7 +216,7 @@ int main() {
                 }
             }
             
-            // --- Draw the final Detections using final_kept_indices ---
+            // Draw final detections
             std::vector<cv::Rect> final_boxes;
             std::vector<float> final_scores;
             std::vector<int> final_ids;
@@ -236,7 +229,6 @@ int main() {
             }
 
             draw::detections(frame, final_boxes, final_scores, final_ids, CLASS_NAMES);
-            // --- END Section A ---
 
         } else {
              cv::putText(frame, "Output tensor issue or no detections", cv::Point(10, 60), // Moved down
