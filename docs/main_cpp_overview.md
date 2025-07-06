@@ -23,3 +23,12 @@ This document summarizes the functionality of `main.cpp`, which implements a rea
   - Displaying FPS and exiting when `q` is pressed.
 
 Overall, `main.cpp` demonstrates preprocessing, inference, and postprocessing steps for YOLO-based object detection using OpenCV and ONNX Runtime.
+## Per-Class Non-Max Suppression
+After detections are decoded, the code groups them by class ID. For each class,
+OpenCV's `cv::dnn::NMSBoxes` is called with the bounding boxes and scores.
+The `nms_threshold` parameter defines the maximum IoU (intersection over union)
+between boxes that will be kept; lower values remove more overlapping detections.
+`NMSBoxes` returns indices of the boxes that survive for that class. These
+indices are remapped to the original detection list and stored in
+`final_kept_indices`, which determines which boxes should ultimately be drawn.
+
