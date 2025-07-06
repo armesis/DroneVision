@@ -110,7 +110,7 @@ int main() {
 
         // const float obj_threshold = 1.0f; // Objectness threshold for YOLOv11
         const float conf_threshold = 0.75f; // Final confidence threshold
-        const float nms_threshold = 0.91f;  // Your NMS threshold
+        const float nms_threshold = 1.0f;  // Your NMS threshold
 
         std::vector<cv::Rect> bboxes;
         std::vector<float> scores;
