@@ -123,64 +123,16 @@ int main() {
             auto shape   = output_tensors[0].GetTensorTypeAndShapeInfo().GetShape();
             const float* base = output_tensors[0].GetTensorData<float>();
             
-            int64_t ATTR = shape[1];          // 84
-            int64_t DETS = shape[2];          // 8400
 
-            int det_id = 0;                   // ← pick the column you want for debugging
-
-            // Example debug print for a single detection column
-            /*
-            std::cout << "Detection " << det_id << " (" << ATTR << " numbers):\n";
-            for (int a = 0; a < ATTR; ++a) {
-                float v = base[a * DETS + det_id];   // [attr , det_id]
-                std::cout << std::setw(10) << v;
-                if ((a + 1) % 8 == 0) std::cout << '\n';
-            }
-            std::cout << std::endl;
-            */
-
-            int64_t B = shape[0];
-            int64_t D = 0;                      // will hold the true detection count
-            int64_t STRIDE;                     // 85 in the normal case
-            int64_t NC = CLASS_NAMES.size();
-
-            // Debug: print raw output tensor shape
-            // std::cout << "Raw output shape = [ ";
-            // for (auto v : shape) std::cout << v << ' ';
-            // std::cout << "]\n";
-
-            const int EXP_ROW   = NC + 5;          // 85 for COCO
-            const int EXP_ROW_N = NC + 4;          // 84 when no obj score
-
-            bool layout_B84D = false;
-            if (shape.size() == 3)
+            if (shape.size() != 3)
             {
-                if (shape[2] == EXP_ROW) {         // [B, D, 85]
-                    D      = shape[1];
-                    STRIDE = EXP_ROW;
-                    // std::cout << "[B, D, 85]" << std::endl;
-                }
-                else if (shape[1] == EXP_ROW) {    // [B, 85, D]
-                    D      = shape[2];
-                    STRIDE = EXP_ROW;
-                    // std::cout << "[B, 85, D]" << std::endl;
-                }
-                else if (shape[1] == 1 && shape[2] % EXP_ROW == 0) { // [B,1,flat]
-                    D      = shape[2] / EXP_ROW;
-                    STRIDE = EXP_ROW;
-                    // std::cout << "[B,1,flat]" << std::endl;
-                }
-                else if (shape[1] == EXP_ROW_N) {  // [B, 84, D]
-                    D      = shape[2];
-                    STRIDE = EXP_ROW_N;
-                    layout_B84D = true;
-                    std::cout << "[B, 84, D]" << std::endl;
-                }
-                else {
-                    std::cerr << "Unhandled 3-D output shape\n";
-                    return 0;
-                }
+                std::cerr << "Unexpected output tensor shape" << std::endl;
+                return 0;
             }
+
+            int64_t STRIDE = shape[1];
+            int64_t D = shape[2];
+            int64_t NC = CLASS_NAMES.size();
 
 
             float model_input_width_float = static_cast<float>(width);  // Model input width (e.g., 640)
@@ -190,27 +142,14 @@ int main() {
             // For Ultralytics YOLO export without postprocessing the last dimension is
             // (num_classes + 5) -> [objectness, cx, cy, w, h, class scores]
 
+            std::vector<float> row_buf(STRIDE);
             for (int i = 0; i < D; ++i) {
-                const float* row = nullptr;
-                std::vector<float> row_buf;
-                if (layout_B84D) {
-                    row_buf.resize(STRIDE);
-                    for (int a = 0; a < STRIDE; ++a)
-                        row_buf[a] = base[a * D + i];       // gather attribute a for det i
-                    row = row_buf.data();
-                } else {
-                    row = base + i * STRIDE;
-                }
+                for (int a = 0; a < STRIDE; ++a)
+                    row_buf[a] = base[a * D + i];       // gather attribute a for det i
+                const float* row = row_buf.data();
 
                 // float objectness = 1.0f;               // default when no explicit obj score
                 int   cls_offset = 4;                  // cx,cy,w,h then classes
-
-                /* if (!layout_B84D && STRIDE == EXP_ROW) { // full 85 layout
-                    objectness = row[0];
-                    cls_offset = 5;
-                }*/
-                // if (objectness < obj_threshold) continue;
-                // std::cout << "objectness = " << objectness << std::endl;
 
                 const float* cls = row + cls_offset;
                 int best_id      = std::max_element(cls, cls + NC) - cls;
