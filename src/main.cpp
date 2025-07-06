@@ -285,7 +285,18 @@ int main() {
             }
             
             // --- Draw the final Detections using final_kept_indices ---
-            draw::detections(frame, bboxes, scores, class_ids, CLASS_NAMES);
+            std::vector<cv::Rect> final_boxes;
+            std::vector<float> final_scores;
+            std::vector<int> final_ids;
+
+            for (int idx : final_kept_indices) {
+                if (idx < 0 || idx >= static_cast<int>(bboxes.size())) continue;
+                final_boxes.push_back(bboxes[idx]);
+                final_scores.push_back(scores[idx]);
+                final_ids.push_back(class_ids[idx]);
+            }
+
+            draw::detections(frame, final_boxes, final_scores, final_ids, CLASS_NAMES);
             // --- END Section A ---
 
         } else {
